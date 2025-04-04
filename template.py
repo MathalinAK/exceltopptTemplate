@@ -56,11 +56,8 @@ def create_anniversary_slides(excel_path, template_path, output_path):
         add_name_to_first_slide(presentation, user_name)
         if presentation.Slides.Count < 2:
             raise ValueError("Template must have at least 2 slides (cover + message template).")
-        
-        # Process first slide (cover)
         first_slide = presentation.Slides(1)
-        
-        # Process message slides
+    
         message_template_index = 2  
         max_messages_per_slide = 2  
         messages_on_slide = 0  
@@ -102,12 +99,9 @@ def create_anniversary_slides(excel_path, template_path, output_path):
             signature_frame.ParagraphFormat.Alignment = PPConst.ppAlignRight  
             signature_box.TextFrame.WordWrap = False  
             messages_on_slide += 1 if not is_long_message else max_messages_per_slide  
-
-        # Delete the template slide if it still exists
         if presentation.Slides.Count > 2:
             presentation.Slides(2).Delete()  
 
-        # Add thank you slide (will be slide 3)
         add_thank_you_slide(presentation)
 
         presentation.SaveAs(os.path.abspath(output_path))
@@ -164,21 +158,15 @@ def modify_pptx(input_path, output_path):
         if selected_anniversary not in anniversary_slides:
             print("Invalid anniversary number!")
             return
-
-        # Find and store the logo from the first slide
         logo_shape = None
         first_slide = presentation.Slides(1)
         for shape in first_slide.Shapes:
-            if shape.Type == 13 and shape.Left < 100 and shape.Top < 100:  # Assuming logo is in top-left
+            if shape.Type == 13 and shape.Left < 100 and shape.Top < 100:  
                 logo_shape = shape
                 break
-
-        # Delete unwanted anniversary slides
         for i in reversed(range(1, presentation.Slides.Count + 1)):
             if i != selected_anniversary:
                 presentation.Slides(i).Delete()
-
-        # Process first slide - keep both logo and anniversary image
         first_slide = presentation.Slides(1)
         shapes_to_delete = []
         anniversary_image = None
@@ -188,17 +176,13 @@ def modify_pptx(input_path, output_path):
                                     "Employee Name" in shape.TextFrame.TextRange.Text):
                 shapes_to_delete.append(shape)
             elif shape.Type == 13:
-                # Keep both logo (top-left) and anniversary image (assuming centered)
                 if not (shape.Left < 100 and shape.Top < 100):
                     anniversary_image = shape
 
         for shape in shapes_to_delete:
             shape.Delete()
-
-        # Create message slide (will be slide 2)
         message_slide = first_slide.Duplicate().Item(1)
-        
-        # Clean up message slide (keep only logo)
+    
         for shape in list(message_slide.Shapes):
             if not (shape.Type == 13 and shape.Left < 100 and shape.Top < 100):
                 shape.Delete()
