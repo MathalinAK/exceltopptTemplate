@@ -37,6 +37,12 @@ def add_name_to_first_slide(presentation, user_name):
     text_frame.Font.Color.RGB = rgb_to_ole(0, 0, 0) 
     text_frame.Font.Bold = True
     text_frame.ParagraphFormat.Alignment = PPConst.ppAlignCenter
+def clean_first_slide(presentation):
+    """Remove the default 'Employee Name' text from first slide"""
+    first_slide = presentation.Slides(1)
+    for shape in list(first_slide.Shapes):
+        if shape.HasTextFrame and "Employee Name" in shape.TextFrame.TextRange.Text:
+            shape.Delete()
 
 def create_anniversary_slides(excel_path, template_path, output_path):
     """Generate a PowerPoint presentation with anniversary wishes."""
@@ -46,14 +52,16 @@ def create_anniversary_slides(excel_path, template_path, output_path):
     user_name = input("Enter your name: ").strip() 
     df = pd.read_excel(excel_path).rename(columns=lambda x: x.strip())  
     required_columns = ['Name', 'Wishes']
-    if not all(col in df.columns for col in required_columns):
+    if not all(col in df.columns for col in required_columns):   
         print(f" Error: Missing required columns in Excel file: {df.columns}")
         return
     try:
         powerpoint = comtypes.client.CreateObject("PowerPoint.Application")
         powerpoint.Visible = 1  
         presentation = powerpoint.Presentations.Open(os.path.abspath(template_path))
+        clean_first_slide(presentation)
         add_name_to_first_slide(presentation, user_name)
+
         if presentation.Slides.Count < 2:
             raise ValueError("Template must have at least 2 slides (cover + message template).")
         first_slide = presentation.Slides(1)
@@ -65,6 +73,7 @@ def create_anniversary_slides(excel_path, template_path, output_path):
         text_positions_two = [(100, 100), (100, 250)]
         text_positions_one = [(presentation.PageSetup.SlideWidth // 2 - 250, 
                       presentation.PageSetup.SlideHeight // 3)]
+        df = df.iloc[::-1] 
 
         for index, row in df.iterrows():
             name = " ".join(word.capitalize() for word in str(row['Name']).strip().split() if word)
@@ -83,7 +92,7 @@ def create_anniversary_slides(excel_path, template_path, output_path):
             text_frame.Text = message
             text_frame.Font.Size = 18
             text_frame.Font.Name = "Century Gothic"
-            text_frame.Font.Bold = True
+            text_frame.Font.Bold = False
             text_frame.Font.Color.RGB = rgb_to_ole(0, 0, 0)
             text_frame.ParagraphFormat.Alignment = PPConst.ppAlignJustify
             message_height = text_box.TextFrame.TextRange.BoundHeight  
@@ -95,7 +104,7 @@ def create_anniversary_slides(excel_path, template_path, output_path):
             signature_frame.Font.Size = 18
             signature_frame.Font.Name = "Century Gothic"
             signature_frame.Font.Color.RGB = rgb_to_ole(255, 0, 0) 
-            signature_frame.Font.Italic = True
+            signature_frame.Font.Bold = True
             signature_frame.ParagraphFormat.Alignment = PPConst.ppAlignRight  
             signature_box.TextFrame.WordWrap = False  
             messages_on_slide += 1 if not is_long_message else max_messages_per_slide  
@@ -113,88 +122,74 @@ def create_anniversary_slides(excel_path, template_path, output_path):
         print(f"Error in create_anniversary_slides: {e}")
 
 def add_thank_you_slide(presentation):
-    """Add 'Thank You' text to the last slide only."""
+    """Add 'Thank You' slide preserving both corner designs"""
     thank_you_slide = presentation.Slides(1).Duplicate().Item(1)
     thank_you_slide.MoveTo(presentation.Slides.Count)
-
-    for shape in list(thank_you_slide.Shapes):  
-        if not (shape.Type == 13 and shape.Left < 100 and shape.Top < 100):
+    slide_width = presentation.PageSetup.SlideWidth
+    slide_height = presentation.PageSetup.SlideHeight
+    for shape in list(thank_you_slide.Shapes):
+        is_top_left = (shape.Left < 200 and shape.Top < 200) 
+        is_bottom_right = (
+            shape.Left > slide_width - 400 and 
+            shape.Top > slide_height - 200 and 
+            shape.Width < 300 and  
+            shape.Height < 300
+        )
+        
+        if not (is_top_left or is_bottom_right):
             shape.Delete()
     text_box = thank_you_slide.Shapes.AddTextbox(
         1, 
-        presentation.PageSetup.SlideWidth/2 - 150,  
-        presentation.PageSetup.SlideHeight/2 - 40,  
+        slide_width/2 - 150,  
+        slide_height/2 - 40,  
         300, 80
     )
     text_frame = text_box.TextFrame.TextRange
-    text_frame.Text = "Thank You"
+    text_frame.Text = "Thank you"
     text_frame.Font.Size = 65
     text_frame.Font.Name = "Century Gothic"
-    text_frame.Font.Color.RGB = rgb_to_ole(255, 0, 0)  
+    text_frame.Font.Color.RGB = rgb_to_ole(255, 0, 0)
+    text_frame.Font.Bold = True
     text_frame.Font.Italic = True
     text_frame.ParagraphFormat.Alignment = PPConst.ppAlignCenter
     text_box.TextFrame.WordWrap = False
 
+def create_message_template_slide(presentation):
+    """Create message template by duplicating first slide and removing anniversary logo + name"""
+    message_slide = presentation.Slides(1).Duplicate().Item(1)
+    for shape in list(message_slide.Shapes):
+        if shape.HasTextFrame and "Employee Name" in shape.TextFrame.TextRange.Text:
+            shape.Delete()
+        elif shape.Type == 13 and not (shape.Left < 100 and shape.Top < 100):
+            shape.Delete()
+    
+    return message_slide
+
+
 def modify_pptx(input_path, output_path):
-    """Modify a PowerPoint template while preserving the Entrans logo on all slides"""
-    input_path = os.path.abspath(input_path)
-    output_path = os.path.abspath(output_path)
-    if not os.path.exists(input_path):
-        print(f"Error: Input PowerPoint file not found: {input_path}")
-        return
-    if os.path.exists(output_path):
-        try:
-            os.remove(output_path)  
-            print(f"Closed existing file: {output_path}")
-        except PermissionError:
-            print(f"Cannot modify {output_path}, it's open. Close it and try again.")
-            return
+    """Process template - keeps anniversary logo+name on first slide only"""
     try:
         powerpoint = comtypes.client.CreateObject("PowerPoint.Application")
-        powerpoint.Visible = 1  
-        presentation = powerpoint.Presentations.Open(input_path)
-        selected_anniversary = int(input("Enter the Work Anniversary (1, 2, 3, or 4): "))
-        anniversary_slides = {1: 1, 2: 2, 3: 3, 4: 4}  
-        if selected_anniversary not in anniversary_slides:
-            print("Invalid anniversary number!")
+        powerpoint.Visible = 1
+        presentation = powerpoint.Presentations.Open(os.path.abspath(input_path))
+        selected_anniversary = int(input("Enter Anniversary (1-4): "))
+        valid_slides = {1, 2, 3, 4}
+        if selected_anniversary not in valid_slides:
+            print("Invalid selection! Use 1-4")
             return
-        logo_shape = None
-        first_slide = presentation.Slides(1)
-        for shape in first_slide.Shapes:
-            if shape.Type == 13 and shape.Left < 100 and shape.Top < 100:  
-                logo_shape = shape
-                break
         for i in reversed(range(1, presentation.Slides.Count + 1)):
             if i != selected_anniversary:
                 presentation.Slides(i).Delete()
-        first_slide = presentation.Slides(1)
-        shapes_to_delete = []
-        anniversary_image = None
-        
-        for shape in first_slide.Shapes:
-            if shape.HasTextFrame and ("ANNIVERSARY" in shape.TextFrame.TextRange.Text.upper() or 
-                                    "Employee Name" in shape.TextFrame.TextRange.Text):
-                shapes_to_delete.append(shape)
-            elif shape.Type == 13:
-                if not (shape.Left < 100 and shape.Top < 100):
-                    anniversary_image = shape
-
-        for shape in shapes_to_delete:
-            shape.Delete()
-        message_slide = first_slide.Duplicate().Item(1)
-    
-        for shape in list(message_slide.Shapes):
-            if not (shape.Type == 13 and shape.Left < 100 and shape.Top < 100):
-                shape.Delete()
-
-        temp_output = output_path.replace(".pptx", "_temp.pptx")
-        presentation.SaveAs(temp_output)
+        create_message_template_slide(presentation)
+        temp_path = output_path.replace(".pptx", "_temp.pptx")
+        presentation.SaveAs(os.path.abspath(temp_path))
         presentation.Close()
         time.sleep(1)
-        os.replace(temp_output, output_path)
-        print(f"Modified PowerPoint saved as: {output_path}")
+        os.replace(temp_path, output_path)
+        print(f"Template ready: {output_path}")
+        
     except Exception as e:
-        print(f"Error in modify_pptx: {e}")
+        print(f"Error: {e}")
     finally:
         powerpoint.Quit()
 
